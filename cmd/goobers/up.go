@@ -1438,6 +1438,10 @@ func runUpContextWithForce(parentCtx context.Context, force <-chan struct{}, arg
 		}
 	}()
 
+	fleetConnectorDone, fleetConnectorStarted, fleetConnectorErr := startDaemonFleetConnector(ctx, root)
+	if fleetConnectorErr != nil {
+		pf(stdout, "warning: Fleet connector unavailable: %v\n", fleetConnectorErr)
+	}
 	if webhookGate.Start() {
 		ready.Store(true)
 	}
@@ -1447,6 +1451,9 @@ func runUpContextWithForce(parentCtx context.Context, force <-chan struct{}, arg
 	}
 	if diagnosticsMode {
 		pln(stdout, "diagnostics mode: ON — long-running stages get periodic process samples + lsof + un-truncated output recorded as run artifacts")
+	}
+	if fleetConnectorStarted {
+		pln(stdout, "Fleet connector started")
 	}
 	var heartbeatDone <-chan struct{}
 	if !*quiet {
@@ -1551,6 +1558,13 @@ func runUpContextWithForce(parentCtx context.Context, force <-chan struct{}, arg
 	<-supervisorStopDone
 	if heartbeatDone != nil {
 		<-heartbeatDone
+	}
+	if fleetConnectorStarted {
+		if connectorErr := <-fleetConnectorDone; connectorErr != nil &&
+			!errors.Is(connectorErr, context.Canceled) &&
+			!errors.Is(connectorErr, context.DeadlineExceeded) {
+			pf(stdout, "warning: Fleet connector stopped: %v\n", connectorErr)
+		}
 	}
 
 	if runErr != nil && !errors.Is(runErr, context.Canceled) && !errors.Is(runErr, context.DeadlineExceeded) {
